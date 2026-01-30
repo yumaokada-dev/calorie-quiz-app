@@ -4,7 +4,6 @@ import { db } from "./firebase";
 import { collection, getDocs } from "firebase/firestore";
 import Link from "next/link";
 
-// 型定義などは変更なし
 type QuizItem = {
   id: string;
   name: string;
@@ -33,6 +32,7 @@ export default function Home() {
   const [gameMode, setGameMode] = useState<"choice" | "input" | null>(null);
   const [currentChoices, setCurrentChoices] = useState<number[]>([]);
 
+  // データ取得
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -59,6 +59,29 @@ export default function Home() {
     fetchData();
   }, []);
 
+  // ★ここが新機能！ブラウザの「戻るボタン」を制御する魔法
+  useEffect(() => {
+    // ゲームモードに入ったら、履歴に履歴を追加する
+    if (gameMode) {
+      window.history.pushState(null, "", window.location.href);
+
+      const handlePopState = () => {
+        // ブラウザの戻るボタンが押されたら、モードを解除してタイトルに戻る
+        setGameMode(null);
+        setCurrentIndex(0); // ついでに問題も最初に戻す
+        setResult(null);
+        setShowTrivia(false);
+      };
+
+      window.addEventListener("popstate", handlePopState);
+
+      return () => {
+        window.removeEventListener("popstate", handlePopState);
+      };
+    }
+  }, [gameMode]);
+
+  // 4択生成
   useEffect(() => {
     if (quizData.length > 0 && gameMode === "choice" && quizData[currentIndex]) {
       generateChoices(quizData[currentIndex].calories);
@@ -96,6 +119,7 @@ export default function Home() {
     setShowTrivia(true);
   };
 
+  // ★「次へ」ボタン
   const handleNext = () => {
     if (currentIndex < quizData.length - 1) {
       setCurrentIndex(currentIndex + 1);
@@ -108,6 +132,16 @@ export default function Home() {
     }
   };
 
+  // ★「前へ」ボタン（新機能）
+  const handlePrev = () => {
+    if (currentIndex > 0) {
+      setCurrentIndex(currentIndex - 1);
+      setUserInput("");
+      setResult(null); // 前に戻ったら回答状態をリセット
+      setShowTrivia(false);
+    }
+  };
+
   const getShareUrl = (text: string) => {
     const url = typeof window !== "undefined" ? window.location.href : "";
     return `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}&hashtags=カロリークイズ`;
@@ -115,7 +149,7 @@ export default function Home() {
 
   if (loading) return (
     <div className="min-h-screen bg-orange-50 flex justify-center items-center">
-      <div className="animate-spin text-4xl">🍔</div>
+      <div className="animate-spin text-4xl">🥦</div>
     </div>
   );
 
@@ -126,26 +160,26 @@ export default function Home() {
     </div>
   );
 
-  // ★デザイン変更：モード選択画面
+  // モード選択画面
   if (!gameMode) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-orange-400 to-red-500 flex flex-col items-center justify-center p-6 text-white">
+      <div className="min-h-screen bg-gradient-to-br from-green-400 to-green-600 flex flex-col items-center justify-center p-6 text-white">
         <div className="text-center space-y-2 mb-10">
-          <div className="text-7xl mb-4 animate-bounce">🍔</div>
+          <div className="text-7xl mb-4 animate-bounce">🥦</div>
           <h1 className="text-4xl font-black tracking-widest drop-shadow-md">直感！<br/>カロリークイズ</h1>
-          <p className="text-orange-100 font-bold opacity-90">あなたの「目利き」は本物か？</p>
+          <p className="text-green-100 font-bold opacity-90">あなたの「目利き」は本物か？</p>
         </div>
         
         <div className="space-y-4 w-full max-w-sm">
           <button 
             onClick={() => setGameMode("choice")}
-            className="w-full bg-white text-orange-600 py-5 rounded-2xl text-xl font-bold shadow-lg hover:scale-105 transition transform flex items-center justify-center gap-3"
+            className="w-full bg-white text-green-600 py-5 rounded-2xl text-xl font-bold shadow-lg hover:scale-105 transition transform flex items-center justify-center gap-3"
           >
             <span className="text-2xl">🅰️</span> 4択で遊ぶ
           </button>
           <button 
             onClick={() => setGameMode("input")}
-            className="w-full bg-orange-700 bg-opacity-40 border-2 border-white text-white py-5 rounded-2xl text-xl font-bold shadow-lg hover:bg-opacity-50 transition transform flex items-center justify-center gap-3 backdrop-blur-sm"
+            className="w-full bg-green-800 bg-opacity-40 border-2 border-white text-white py-5 rounded-2xl text-xl font-bold shadow-lg hover:bg-opacity-50 transition transform flex items-center justify-center gap-3 backdrop-blur-sm"
           >
             <span className="text-2xl">🔢</span> 数字を入力して挑む
           </button>
@@ -160,28 +194,28 @@ export default function Home() {
     );
   }
 
-  // ★デザイン変更：クイズ画面
+  // クイズ画面
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col items-center py-8 px-4">
-      <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl overflow-hidden">
+      <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl overflow-hidden min-h-[600px] flex flex-col">
         
         {/* ヘッダー */}
         <div className="bg-slate-800 text-white p-4 flex justify-between items-center">
           <span className="font-bold text-sm tracking-widest">QUESTION {currentIndex + 1} / {quizData.length}</span>
-          <button onClick={() => setGameMode(null)} className="text-xs bg-slate-700 px-3 py-1 rounded-full hover:bg-slate-600">
+          <button onClick={() => window.history.back()} className="text-xs bg-slate-700 px-3 py-1 rounded-full hover:bg-slate-600">
             やめる
           </button>
         </div>
 
         {currentIndex < quizData.length && result !== "🎉 全問クリア！ 🎉" ? (
-          <div className="p-6">
+          <div className="p-6 flex-1 flex flex-col">
             <div className="mb-6 text-center">
               <div className="relative w-full aspect-video mb-4 rounded-xl overflow-hidden bg-gray-100 shadow-inner border-2 border-gray-100">
                  {/* eslint-disable-next-line @next/next/no-img-element */}
                  <img src={currentQuiz.image_url || "https://placehold.jp/150x150.png?text=NoImage"} alt={currentQuiz.name} className="w-full h-full object-cover" />
               </div>
               <h2 className="text-2xl font-black text-gray-800 mb-1">{currentQuiz.name}</h2>
-              <p className="inline-block bg-orange-100 text-orange-600 px-3 py-1 rounded-full font-bold text-sm">{currentQuiz.amount}</p>
+              <p className="inline-block bg-green-100 text-green-800 px-3 py-1 rounded-full font-bold text-sm">{currentQuiz.amount}</p>
             </div>
 
             {!showTrivia ? (
@@ -189,7 +223,7 @@ export default function Home() {
                 {gameMode === "choice" && (
                   <div className="grid grid-cols-2 gap-3">
                     {currentChoices.map((choice, i) => (
-                      <button key={i} onClick={() => handleChoiceAnswer(choice)} className="bg-white text-slate-700 font-bold py-4 rounded-xl border-2 border-slate-200 hover:border-orange-500 hover:bg-orange-50 hover:text-orange-600 transition shadow-sm active:scale-95">
+                      <button key={i} onClick={() => handleChoiceAnswer(choice)} className="bg-white text-slate-700 font-bold py-4 rounded-xl border-2 border-slate-200 hover:border-green-500 hover:bg-green-50 hover:text-green-600 transition shadow-sm active:scale-95">
                         {choice} <span className="text-xs">kcal</span>
                       </button>
                     ))}
@@ -197,8 +231,8 @@ export default function Home() {
                 )}
                 {gameMode === "input" && (
                   <div className="flex flex-col gap-3">
-                    <input type="number" placeholder="0" className="w-full p-4 bg-gray-50 border-2 border-gray-200 rounded-xl text-center text-3xl font-bold text-gray-800 focus:outline-none focus:border-orange-500" value={userInput} onChange={(e) => setUserInput(e.target.value)} />
-                    <button onClick={handleInputAnswer} className="w-full bg-orange-500 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-orange-600 transition active:scale-95">
+                    <input type="number" placeholder="0" className="w-full p-4 bg-gray-50 border-2 border-gray-200 rounded-xl text-center text-3xl font-bold text-gray-800 focus:outline-none focus:border-green-500" value={userInput} onChange={(e) => setUserInput(e.target.value)} />
+                    <button onClick={handleInputAnswer} className="w-full bg-green-500 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-green-600 transition active:scale-95">
                       決定！
                     </button>
                   </div>
@@ -223,15 +257,34 @@ export default function Home() {
                   <p className="font-bold text-slate-500 text-xs mb-2 tracking-wider">MAME-CHISHIKI</p>
                   <p className="text-slate-700 text-sm leading-relaxed font-medium">{currentQuiz.trivia}</p>
                 </div>
-
-                <button onClick={handleNext} className="w-full bg-blue-600 text-white py-4 rounded-xl hover:bg-blue-700 font-bold transition shadow-lg active:scale-95">
-                  次の問題へ →
-                </button>
               </div>
             )}
+
+            {/* ★ここが新機能！画面下部のナビゲーションボタン */}
+            <div className="mt-auto pt-6 flex gap-3">
+              <button 
+                onClick={handlePrev} 
+                disabled={currentIndex === 0} // 最初の問題なら押せないようにする
+                className={`flex-1 py-3 rounded-xl font-bold transition ${
+                  currentIndex === 0 
+                    ? "bg-gray-100 text-gray-400 cursor-not-allowed" 
+                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                }`}
+              >
+                ← 前へ
+              </button>
+              
+              <button 
+                onClick={handleNext} 
+                className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition shadow-lg active:scale-95"
+              >
+                {showTrivia ? "次の問題へ →" : "スキップ →"}
+              </button>
+            </div>
+
           </div>
         ) : (
-          <div className="py-16 px-6 text-center bg-gradient-to-b from-white to-yellow-50 h-full">
+          <div className="py-16 px-6 text-center bg-gradient-to-b from-white to-green-50 h-full flex flex-col justify-center">
             <div className="text-7xl mb-6 animate-bounce">🏆</div>
             <h2 className="text-3xl font-black mb-4 text-slate-800">全問クリア！</h2>
             <p className="text-slate-500 mb-10 font-bold">あなたのカロリー感覚は完璧です。</p>
