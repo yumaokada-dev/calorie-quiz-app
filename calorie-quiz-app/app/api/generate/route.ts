@@ -43,7 +43,9 @@ export async function POST() {
     const data = JSON.parse(jsonString);
 
     // 画像URL
-    data.image_url = `https://source.unsplash.com/featured/?${encodeURIComponent(data.image_query)},food`;
+    // 画像URL（料理名が入ったイラスト風カードを生成）
+// オレンジ色の背景(ff9933)に白文字(ffffff)で料理名を表示します
+data.image_url = `https://placehold.jp/40/ff9933/ffffff/600x400.png?text=${encodeURIComponent(data.name + "(イメージ)")}`;
 
     return NextResponse.json(data);
 
