@@ -3,7 +3,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export async function POST() {
   try {
-    // APIキー（Google AI Studioで取得した新しいキー）
+    // APIキー
     const apiKey = "AIzaSyD_YTiNeJP5nOW02z7X5xX7rXkbXA6poUI";
     
     if (!apiKey) {
@@ -12,7 +12,7 @@ export async function POST() {
 
     const genAI = new GoogleGenerativeAI(apiKey);
     
-    // 最新モデル gemini-2.5-flash を使用
+    // モデルは gemini-2.5-flash
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const prompt = `
@@ -24,7 +24,7 @@ export async function POST() {
         "amount": "量（例: 1人前、100g）",
         "calories": 数値（整数）,
         "trivia": "その料理に関する豆知識（日本語）",
-        "image_query": "英語の料理名（例: sushi, hamburger）"
+        "image_query": "英語の料理名"
       }
     `;
 
@@ -40,10 +40,12 @@ export async function POST() {
     const jsonString = text.replace(/```json/g, "").replace(/```/g, "").trim();
     const data = JSON.parse(jsonString);
 
-  // ★ここを修正！
-    // Bingの画像検索結果（サムネイル）を直接表示します
-    // "料理名 + 美味しそうな写真" で検索して、500x500サイズで表示
+    // ★Bing画像検索のサムネイルを使用（ここが最新の修正点）
     data.image_url = `https://tse2.mm.bing.net/th?q=${encodeURIComponent(data.name + " 美味しそうな写真")}&w=500&h=500&c=7`;
+
+    // ★★★ここが消えていた原因です！★★★
+    // 生成したデータをブラウザに返します
+    return NextResponse.json(data);
 
   } catch (error: any) {
     console.error("★詳細なエラー:", error);
