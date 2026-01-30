@@ -1,10 +1,9 @@
 "use client";
 import { useState, useEffect } from "react";
 import { db } from "../firebase";
-import { collection, addDoc, getDocs, deleteDoc, doc } from "firebase/firestore"; // 必要な機能を追加
+import { collection, addDoc, getDocs, deleteDoc, doc } from "firebase/firestore";
 import Link from "next/link";
 
-// データの型定義
 type QuizItem = {
   id: string;
   name: string;
@@ -13,7 +12,6 @@ type QuizItem = {
 };
 
 export default function AdminPage() {
-  // 入力フォームの状態
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [calories, setCalories] = useState("");
@@ -22,15 +20,13 @@ export default function AdminPage() {
   const [message, setMessage] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // ★一覧表示用の状態
+  // 一覧表示用
   const [quizList, setQuizList] = useState<QuizItem[]>([]);
 
-  // ★画面が開いた時に、登録済みのクイズを取得する
   useEffect(() => {
     fetchQuizzes();
   }, []);
 
-  // クイズ一覧をデータベースから取得する関数
   const fetchQuizzes = async () => {
     try {
       const querySnapshot = await getDocs(collection(db, "quizzes"));
@@ -44,38 +40,47 @@ export default function AdminPage() {
           image_url: data.image_url,
         });
       });
-      // 作成日順などで並び替えたい場合はここでsortする（今回は簡易的にそのまま）
       setQuizList(list);
     } catch (error) {
       console.error("一覧の取得に失敗:", error);
     }
   };
 
-  // ★削除ボタンを押したときの処理
   const handleDelete = async (id: string) => {
     if (!confirm("本当に削除しますか？")) return;
-
     try {
-      await deleteDoc(doc(db, "quizzes", id)); // データベースから削除
+      await deleteDoc(doc(db, "quizzes", id));
       setMessage("削除しました🗑️");
-      fetchQuizzes(); // 一覧を再読み込みして画面を更新
+      fetchQuizzes();
     } catch (error) {
       console.error("削除エラー:", error);
       alert("削除に失敗しました");
     }
   };
 
-  // AI自動生成ボタン
+  // ★ここが修正ポイント！
+  // 入力された name をサーバーに送信します
   const handleAutoGenerate = async () => {
     setIsGenerating(true);
-    setMessage("AIがメニューを考えています...🍳");
+    
+    // 料理名が入っているかでメッセージを変える
+    if (name) {
+      setMessage(`AIが「${name}」のデータを調べています...🔍`);
+    } else {
+      setMessage("AIがランダムなメニューを考えています...🍳");
+    }
     
     try {
-      const res = await fetch("/api/generate", { method: "POST" });
+      // ★ keyword として name を送る設定を追加
+      const res = await fetch("/api/generate", { 
+        method: "POST",
+        body: JSON.stringify({ keyword: name }), 
+      });
       const data = await res.json();
 
       if (data.error) throw new Error(data.error);
 
+      // AIが作ったデータをフォームにセット
       setName(data.name);
       setAmount(data.amount);
       setCalories(data.calories);
@@ -85,21 +90,18 @@ export default function AdminPage() {
       setMessage("AI生成完了！内容を確認して保存してください。");
     } catch (error) {
       console.error(error);
-      setMessage("AI生成に失敗しました。もう一度試してください。");
+      setMessage("AI生成に失敗しました。");
     } finally {
       setIsGenerating(false);
     }
   };
 
-  // 保存ボタン
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
     if (!name || !amount || !calories || !trivia) {
       alert("全ての項目を入力してください");
       return;
     }
-
     try {
       await addDoc(collection(db, "quizzes"), {
         name,
@@ -111,16 +113,12 @@ export default function AdminPage() {
       });
 
       setMessage("保存しました！リストに追加されました✨");
-      // フォームをクリア
       setName("");
       setAmount("");
       setCalories("");
       setTrivia("");
       setImageUrl("");
-      
-      // ★保存したら一覧も更新する
       fetchQuizzes();
-      
     } catch (error) {
       console.error("保存エラー:", error);
       alert("保存に失敗しました");
@@ -132,6 +130,15 @@ export default function AdminPage() {
       <div className="bg-white p-8 rounded-xl shadow-lg max-w-md w-full mb-10">
         <h1 className="text-2xl font-bold mb-6 text-blue-600">問題作成ツール 📝</h1>
 
+        {/* 使い方ガイド */}
+        <div className="bg-blue-50 p-3 rounded-lg mb-4 text-sm text-blue-800">
+          <p>💡 <strong>使い方テクニック</strong></p>
+          <ul className="list-disc pl-5 mt-1">
+            <li>空欄のままボタン → <strong>ランダム生成</strong></li>
+            <li>料理名を入れてボタン → <strong>その料理を詳細化</strong></li>
+          </ul>
+        </div>
+
         <button
           onClick={handleAutoGenerate}
           disabled={isGenerating}
@@ -141,7 +148,7 @@ export default function AdminPage() {
               : "bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white"
           }`}
         >
-          {isGenerating ? <span>思考中...🧠</span> : <span>✨ AIにおまかせ生成</span>}
+          {isGenerating ? <span>調査中...🧠</span> : <span>✨ AIにおまかせ生成</span>}
         </button>
 
         <hr className="mb-6 border-gray-200" />
@@ -157,7 +164,13 @@ export default function AdminPage() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-bold text-gray-700">料理名</label>
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full p-2 border rounded text-black" placeholder="例: カツ丼" />
+            <input 
+              type="text" 
+              value={name} 
+              onChange={(e) => setName(e.target.value)} 
+              className="w-full p-2 border rounded text-black" 
+              placeholder="例: カツ丼（空欄でもOK）" 
+            />
           </div>
 
           {imageUrl && (
@@ -196,7 +209,6 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* ★ここから下：登録済みリスト表示エリア */}
       <div className="max-w-4xl w-full">
         <h2 className="text-xl font-bold mb-4 text-gray-700 border-l-4 border-blue-500 pl-3">
           登録済みのクイズ一覧 ({quizList.length}問)
