@@ -40,11 +40,10 @@ export async function POST() {
     const jsonString = text.replace(/```json/g, "").replace(/```/g, "").trim();
     const data = JSON.parse(jsonString);
 
-   // ★ここを修正！
-    // Lorem Flickrを使って、Flickrから「英語の料理名」に一致する写真を探して表示します
-    // 600x400 は画像のサイズです
-    data.image_url = `https://loremflickr.com/600/400/${encodeURIComponent(data.image_query)}`;
-    return NextResponse.json(data);
+  // ★ここを修正！
+    // Bingの画像検索結果（サムネイル）を直接表示します
+    // "料理名 + 美味しそうな写真" で検索して、500x500サイズで表示
+    data.image_url = `https://tse2.mm.bing.net/th?q=${encodeURIComponent(data.name + " 美味しそうな写真")}&w=500&h=500&c=7`;
 
   } catch (error: any) {
     console.error("★詳細なエラー:", error);
