@@ -40,10 +40,10 @@ export async function POST() {
     const jsonString = text.replace(/```json/g, "").replace(/```/g, "").trim();
     const data = JSON.parse(jsonString);
 
-    // ★ここを修正！ Pollinations.ai を使って画像を表示します
-    // "英語の料理名 + delicious food photo" という言葉で画像をリクエストします
-    data.image_url = `https://image.pollinations.ai/prompt/${encodeURIComponent(data.image_query + " delicious food photo")}`;
-
+   // ★ここを修正！
+    // Lorem Flickrを使って、Flickrから「英語の料理名」に一致する写真を探して表示します
+    // 600x400 は画像のサイズです
+    data.image_url = `https://loremflickr.com/600/400/${encodeURIComponent(data.image_query)}`;
     return NextResponse.json(data);
 
   } catch (error: any) {
