@@ -3,7 +3,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export async function POST() {
   try {
-    // APIキー
+    // APIキー（Google AI Studioで取得した新しいキー）
     const apiKey = "AIzaSyD_YTiNeJP5nOW02z7X5xX7rXkbXA6poUI";
     
     if (!apiKey) {
@@ -12,9 +12,7 @@ export async function POST() {
 
     const genAI = new GoogleGenerativeAI(apiKey);
     
-    // ★ここを最新モデル "gemini-1.5-flash" に戻します！
-    // ライブラリを更新したので、今度は動くはずです。
-    // ↓ ここを書き換える！
+    // 最新モデル gemini-2.5-flash を使用
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const prompt = `
@@ -26,11 +24,11 @@ export async function POST() {
         "amount": "量（例: 1人前、100g）",
         "calories": 数値（整数）,
         "trivia": "その料理に関する豆知識（日本語）",
-        "image_query": "英語の料理名"
+        "image_query": "英語の料理名（例: sushi, hamburger）"
       }
     `;
 
-    console.log("AIにリクエスト送信中... (Model: gemini-1.5-flash)");
+    console.log("AIにリクエスト送信中... (Model: gemini-2.5-flash)");
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
@@ -42,10 +40,9 @@ export async function POST() {
     const jsonString = text.replace(/```json/g, "").replace(/```/g, "").trim();
     const data = JSON.parse(jsonString);
 
-    // 画像URL
-    // 画像URL（料理名が入ったイラスト風カードを生成）
-// オレンジ色の背景(ff9933)に白文字(ffffff)で料理名を表示します
-data.image_url = `https://placehold.jp/40/ff9933/ffffff/600x400.png?text=${encodeURIComponent(data.name + "(イメージ)")}`;
+    // ★ここを修正！ Pollinations.ai を使って画像を表示します
+    // "英語の料理名 + delicious food photo" という言葉で画像をリクエストします
+    data.image_url = `https://image.pollinations.ai/prompt/${encodeURIComponent(data.image_query + " delicious food photo")}`;
 
     return NextResponse.json(data);
 
