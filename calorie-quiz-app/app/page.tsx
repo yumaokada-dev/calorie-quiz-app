@@ -1,7 +1,10 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { db } from "./firebase";
-import { collection, getDocs, doc, setDoc, getDoc, updateDoc, onSnapshot } from "firebase/firestore";
+import { 
+  collection, getDocs, doc, setDoc, getDoc, updateDoc, onSnapshot, 
+  addDoc, query, where, orderBy, limit 
+} from "firebase/firestore";
 import Link from "next/link";
 
 // --- 型定義 ---
@@ -16,12 +19,18 @@ type QuizItem = {
 
 type BattleState = {
   status: "waiting" | "playing" | "finished";
-  mode: "choice" | "input"; // ★対戦モード（4択 or 入力）を追加
+  mode: "choice" | "input";
   questions: QuizItem[];
   hostScore: number | null;
   guestScore: number | null;
-  hostName: string; // ★ホストの名前
-  guestName: string; // ★ゲストの名前
+  hostName: string;
+  guestName: string;
+};
+
+type RankItem = {
+  id: string;
+  name: string;
+  score: number;
 };
 
 // --- ヘルパー関数 ---
@@ -51,9 +60,13 @@ export default function Home() {
   const [currentChoices, setCurrentChoices] = useState<number[]>([]);
   const [score, setScore] = useState(0);
 
+  // --- ユーザー & ランキング用ステート ---
+  const [userName, setUserName] = useState(""); // ★名前入力用
+  const [ranking, setRanking] = useState<RankItem[]>([]); // ★ランキングデータ
+  const hasSavedRef = useRef(false); // 重複保存防止用
+
   // --- 対戦用ステート ---
-  const [userName, setUserName] = useState(""); // ★ユーザー名入力用
-  const [battleModeInput, setBattleModeInput] = useState<"choice" | "input">("input"); // ★ホストが選ぶモード
+  const [battleModeInput, setBattleModeInput] = useState<"choice" | "input">("input");
   const [roomId, setRoomId] = useState("");
   const [isHost, setIsHost] = useState(false);
   const [inputRoomId, setInputRoomId] = useState("");
@@ -109,6 +122,69 @@ export default function Home() {
     }
   }, [gameMode]);
 
+  // --- ゲーム開始前のチェック ---
+  const startGame = (mode: "choice" | "input") => {
+    if (!userName.trim()) {
+      alert("名前を入力してください！");
+      return;
+    }
+    
+    // 初期化
+    if (allQuizzes.length > 0) {
+      const shuffled = shuffle(allQuizzes);
+      setQuizData(shuffled.slice(0, 10));
+      setCurrentIndex(0);
+      setScore(0);
+      setResult(null);
+      setShowTrivia(false);
+      hasSavedRef.current = false; // 保存フラグをリセット
+      setRanking([]); // ランキング表示をリセット
+      setGameMode(mode);
+    }
+  };
+
+  // --- ランキング保存 & 取得処理 (ソロ終了時) ---
+  useEffect(() => {
+    const saveAndFetchRanking = async () => {
+      // ソロモード終了時のみ実行
+      if (result === "FINISHED" && (gameMode === "choice" || gameMode === "input") && !hasSavedRef.current) {
+        hasSavedRef.current = true; // 二重保存防止
+
+        try {
+          // 1. スコア保存
+          await addDoc(collection(db, "scores"), {
+            name: userName,
+            score: score,
+            mode: gameMode,
+            createdAt: new Date()
+          });
+
+          // 2. ランキング取得 (同じモードの上位10件)
+          const q = query(
+            collection(db, "scores"),
+            where("mode", "==", gameMode),
+            orderBy("score", "desc"),
+            limit(10)
+          );
+          
+          const querySnapshot = await getDocs(q);
+          const rankList: RankItem[] = [];
+          querySnapshot.forEach((doc) => {
+            const d = doc.data();
+            rankList.push({ id: doc.id, name: d.name, score: d.score });
+          });
+          setRanking(rankList);
+
+        } catch (error) {
+          console.error("ランキング処理エラー:", error);
+        }
+      }
+    };
+
+    saveAndFetchRanking();
+  }, [result, gameMode, score, userName]);
+
+
   // --- 対戦ロジック: 部屋作成 (Host) ---
   const createRoom = async () => {
     if (!userName.trim()) {
@@ -125,11 +201,11 @@ export default function Home() {
     try {
       await setDoc(doc(db, "rooms", newRoomId), {
         status: "waiting",
-        mode: battleModeInput, // ★選択したモードを保存
+        mode: battleModeInput,
         questions: questions,
         hostScore: null,
         guestScore: null,
-        hostName: userName, // ★入力した名前を保存
+        hostName: userName,
         guestName: "",
         createdAt: new Date()
       });
@@ -160,9 +236,8 @@ export default function Home() {
         return;
       }
       
-      // ゲストとして名前を登録
       await updateDoc(roomRef, {
-        guestName: userName // ★入力した名前を保存
+        guestName: userName
       });
 
       setRoomId(inputRoomId);
@@ -208,7 +283,6 @@ export default function Home() {
   };
 
   // --- 4択生成 ---
-  // ソロモード(choice) または 対戦モード(battle_game)かつモードがchoiceのとき
   const isChoiceMode = gameMode === "choice" || (gameMode === "battle_game" && battleData?.mode === "choice");
 
   useEffect(() => {
@@ -292,7 +366,6 @@ export default function Home() {
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Enter") {
-        // 入力モードの場合、回答前は反応させない
         const currentIsInput = gameMode === "input" || (gameMode === "battle_game" && battleData?.mode === "input");
         if (currentIsInput && !showTrivia) {
           return;
@@ -346,12 +419,24 @@ export default function Home() {
           <p className="text-green-100 font-bold opacity-90">全10問！あなたの実力は？</p>
         </div>
         
+        {/* ★名前入力欄を追加 */}
+        <div className="w-full max-w-sm mb-6">
+          <label className="block text-sm font-bold text-green-100 mb-1 text-center">ニックネームを入力</label>
+          <input 
+            type="text" 
+            placeholder="例: カロリー博士"
+            className="w-full p-4 border-2 border-white/50 rounded-xl font-bold text-lg text-center bg-white/20 text-white placeholder-white/50 focus:bg-white focus:text-slate-800 transition"
+            value={userName}
+            onChange={(e) => setUserName(e.target.value)}
+          />
+        </div>
+
         <div className="space-y-4 w-full max-w-sm">
           <div className="grid grid-cols-2 gap-3">
-            <button onClick={() => setGameMode("choice")} className="bg-white text-green-600 py-4 rounded-xl text-lg font-bold shadow-lg hover:scale-105 transition">
+            <button onClick={() => startGame("choice")} className="bg-white text-green-600 py-4 rounded-xl text-lg font-bold shadow-lg hover:scale-105 transition">
               🅰️ 4択で遊ぶ
             </button>
-            <button onClick={() => setGameMode("input")} className="bg-green-800 bg-opacity-40 border-2 border-white text-white py-4 rounded-xl text-lg font-bold shadow-lg hover:bg-opacity-50 transition backdrop-blur-sm">
+            <button onClick={() => startGame("input")} className="bg-green-800 bg-opacity-40 border-2 border-white text-white py-4 rounded-xl text-lg font-bold shadow-lg hover:bg-opacity-50 transition backdrop-blur-sm">
               🔢 数字で挑む
             </button>
           </div>
@@ -364,13 +449,13 @@ export default function Home() {
     );
   }
 
-  // --- UI: 対戦メニュー (名前入力 & 作成/参加) ---
+  // --- UI: 対戦メニュー (作成/参加) ---
   if (gameMode === "battle_menu") {
     return (
       <div className="min-h-screen bg-orange-50 flex flex-col items-center justify-center p-6 text-slate-700">
         <h2 className="text-3xl font-black mb-6 text-orange-600">⚔️ オンライン対戦</h2>
         
-        {/* 名前入力欄 (共通) */}
+        {/* 名前入力 (既にタイトルで入れている場合はそのまま表示) */}
         <div className="w-full max-w-sm mb-6">
           <label className="block text-sm font-bold text-gray-500 mb-1">あなたの名前</label>
           <input 
@@ -383,46 +468,22 @@ export default function Home() {
         </div>
 
         <div className="w-full max-w-sm space-y-6">
-          {/* ホストエリア */}
           <div className="bg-white p-6 rounded-xl shadow border border-orange-100">
             <p className="font-bold text-center mb-3 text-orange-500">部屋を作る</p>
-            {/* モード選択 */}
             <div className="flex gap-2 mb-4 justify-center">
-              <button 
-                onClick={() => setBattleModeInput("choice")}
-                className={`px-4 py-2 rounded-lg font-bold text-sm ${battleModeInput === "choice" ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`}
-              >
-                🅰️ 4択
-              </button>
-              <button 
-                onClick={() => setBattleModeInput("input")}
-                className={`px-4 py-2 rounded-lg font-bold text-sm ${battleModeInput === "input" ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`}
-              >
-                🔢 数字入力
-              </button>
+              <button onClick={() => setBattleModeInput("choice")} className={`px-4 py-2 rounded-lg font-bold text-sm ${battleModeInput === "choice" ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`}>🅰️ 4択</button>
+              <button onClick={() => setBattleModeInput("input")} className={`px-4 py-2 rounded-lg font-bold text-sm ${battleModeInput === "input" ? "bg-green-500 text-white" : "bg-gray-100 text-gray-400"}`}>🔢 数字</button>
             </div>
-            <button onClick={createRoom} className="w-full bg-orange-500 text-white py-3 rounded-lg font-bold shadow hover:bg-orange-600 transition">
-              この設定で部屋を作る
-            </button>
+            <button onClick={createRoom} className="w-full bg-orange-500 text-white py-3 rounded-lg font-bold shadow hover:bg-orange-600 transition">この設定で部屋を作る</button>
           </div>
 
-          {/* ゲストエリア */}
           <div className="bg-white p-6 rounded-xl shadow border border-slate-200">
             <p className="font-bold text-center mb-2 text-slate-500">友達の部屋に参加</p>
             <div className="flex gap-2">
-              <input 
-                type="number" 
-                placeholder="番号" 
-                className="flex-1 p-3 border-2 border-slate-200 rounded-lg font-bold text-lg text-center"
-                value={inputRoomId}
-                onChange={(e) => setInputRoomId(e.target.value)}
-              />
-              <button onClick={joinRoom} className="bg-slate-700 text-white px-6 rounded-lg font-bold hover:bg-slate-800 transition">
-                参加
-              </button>
+              <input type="number" placeholder="番号" className="flex-1 p-3 border-2 border-slate-200 rounded-lg font-bold text-lg text-center" value={inputRoomId} onChange={(e) => setInputRoomId(e.target.value)} />
+              <button onClick={joinRoom} className="bg-slate-700 text-white px-6 rounded-lg font-bold hover:bg-slate-800 transition">参加</button>
             </div>
           </div>
-          
           <button onClick={() => setGameMode(null)} className="w-full text-slate-400 mt-2 underline text-sm">戻る</button>
         </div>
       </div>
@@ -436,49 +497,20 @@ export default function Home() {
         <div className="text-center mb-8">
           <p className="text-sm font-bold text-slate-400 mb-2">ROOM ID</p>
           <p className="text-6xl font-black tracking-widest font-mono text-yellow-400">{roomId}</p>
-          <p className="text-sm text-slate-400 mt-2 font-bold">
-            モード: {battleData?.mode === "choice" ? "🅰️ 4択バトル" : "🔢 数字入力バトル"}
-          </p>
+          <p className="text-sm text-slate-400 mt-2 font-bold">モード: {battleData?.mode === "choice" ? "🅰️ 4択" : "🔢 数字"}</p>
         </div>
         
         <div className="bg-slate-700 p-8 rounded-2xl w-full max-w-sm mb-8 space-y-4">
           <div className="flex justify-between items-center border-b border-slate-600 pb-2">
-            <div>
-              <span className="text-xs text-slate-400 block">HOST</span>
-              <span className="font-bold text-xl">{battleData?.hostName || "ホスト"}</span>
-            </div>
+            <div><span className="text-xs text-slate-400 block">HOST</span><span className="font-bold text-xl">{battleData?.hostName || "ホスト"}</span></div>
             <span className="font-bold text-green-400 bg-green-900/30 px-2 py-1 rounded text-xs">準備OK</span>
           </div>
           <div className="flex justify-between items-center">
-            <div>
-              <span className="text-xs text-slate-400 block">GUEST</span>
-              <span className="font-bold text-xl">{battleData?.guestName || "---"}</span>
-            </div>
-            {battleData?.guestName ? (
-              <span className="font-bold text-green-400 bg-green-900/30 px-2 py-1 rounded text-xs">準備OK</span>
-            ) : (
-              <span className="text-slate-500 text-xs animate-pulse">待機中...</span>
-            )}
+            <div><span className="text-xs text-slate-400 block">GUEST</span><span className="font-bold text-xl">{battleData?.guestName || "---"}</span></div>
+            {battleData?.guestName ? <span className="font-bold text-green-400 bg-green-900/30 px-2 py-1 rounded text-xs">準備OK</span> : <span className="text-slate-500 text-xs animate-pulse">待機中...</span>}
           </div>
         </div>
-
-        {isHost ? (
-          <button 
-            onClick={startBattle} 
-            disabled={!battleData?.guestName}
-            className={`w-full max-w-sm py-4 rounded-xl font-bold text-xl transition ${
-              battleData?.guestName 
-                ? "bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white shadow-lg transform hover:scale-105" 
-                : "bg-slate-600 text-slate-400 cursor-not-allowed"
-            }`}
-          >
-            {battleData?.guestName ? "バトル開始！ 🔥" : "対戦相手を待っています..."}
-          </button>
-        ) : (
-          <div className="text-center">
-            <p className="text-xl font-bold animate-bounce">ホストの開始を待っています...</p>
-          </div>
-        )}
+        {isHost ? <button onClick={startBattle} disabled={!battleData?.guestName} className={`w-full max-w-sm py-4 rounded-xl font-bold text-xl transition ${battleData?.guestName ? "bg-gradient-to-r from-orange-500 to-red-500 hover:scale-105 text-white shadow-lg" : "bg-slate-600 text-slate-400 cursor-not-allowed"}`}>{battleData?.guestName ? "バトル開始！ 🔥" : "対戦相手を待っています..."}</button> : <div className="text-center"><p className="text-xl font-bold animate-bounce">ホストの開始を待っています...</p></div>}
         <button onClick={() => setGameMode(null)} className="mt-8 text-slate-500 underline text-sm">キャンセル</button>
       </div>
     );
@@ -487,75 +519,36 @@ export default function Home() {
   // --- UI: 対戦結果画面 ---
   if (gameMode === "battle_result") {
     const isWaiting = battleData?.hostScore === null || battleData?.guestScore === null;
-    
     return (
       <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center p-6">
         {isWaiting ? (
-          <div className="text-center">
-             <div className="text-6xl mb-4 animate-bounce">⏳</div>
-             <h2 className="text-2xl font-bold">{battleMessage}</h2>
-             <p className="text-slate-400 mt-2">相手が解き終わるまでお待ちください</p>
-          </div>
+          <div className="text-center"><div className="text-6xl mb-4 animate-bounce">⏳</div><h2 className="text-2xl font-bold">{battleMessage}</h2><p className="text-slate-400 mt-2">相手が解き終わるまでお待ちください</p></div>
         ) : (
           <div className="w-full max-w-md text-center">
-            <div className="mb-6">
-              <h2 className="text-3xl font-black text-yellow-400 tracking-wider">RESULT</h2>
-              <p className="text-slate-400 text-sm font-bold mt-1">
-                {battleData?.mode === "choice" ? "🅰️ 4択バトル" : "🔢 数字入力バトル"}
-              </p>
-            </div>
-            
-            {/* ランキング風スコア表示 */}
+            <h2 className="text-3xl font-black mb-8 text-yellow-400">BATTLE RESULT</h2>
             <div className="bg-slate-800 rounded-2xl overflow-hidden mb-8 border border-slate-700">
-               <div className="grid grid-cols-3 bg-slate-700 p-2 text-xs text-slate-400 font-bold">
-                 <div className="text-left pl-4">PLAYER</div>
-                 <div>SCORE</div>
-                 <div>WINNER</div>
-               </div>
-               
-               {/* ホストの行 */}
+               <div className="grid grid-cols-3 bg-slate-700 p-2 text-xs text-slate-400 font-bold"><div className="text-left pl-4">PLAYER</div><div>SCORE</div><div>WINNER</div></div>
                <div className={`grid grid-cols-3 p-4 items-center border-b border-slate-700 ${battleData!.hostScore! > battleData!.guestScore! ? "bg-yellow-900/20" : ""}`}>
-                 <div className="text-left font-bold truncate">{battleData?.hostName}</div>
-                 <div className="font-black text-2xl">{battleData?.hostScore}</div>
-                 <div className="text-2xl">{battleData!.hostScore! > battleData!.guestScore! ? "👑" : ""}</div>
+                 <div className="text-left font-bold truncate pl-2">{battleData?.hostName}</div><div className="font-black text-2xl">{battleData?.hostScore}</div><div className="text-2xl">{battleData!.hostScore! > battleData!.guestScore! ? "👑" : ""}</div>
                </div>
-
-               {/* ゲストの行 */}
                <div className={`grid grid-cols-3 p-4 items-center ${battleData!.guestScore! > battleData!.hostScore! ? "bg-yellow-900/20" : ""}`}>
-                 <div className="text-left font-bold truncate">{battleData?.guestName}</div>
-                 <div className="font-black text-2xl">{battleData?.guestScore}</div>
-                 <div className="text-2xl">{battleData!.guestScore! > battleData!.hostScore! ? "👑" : ""}</div>
+                 <div className="text-left font-bold truncate pl-2">{battleData?.guestName}</div><div className="font-black text-2xl">{battleData?.guestScore}</div><div className="text-2xl">{battleData!.guestScore! > battleData!.hostScore! ? "👑" : ""}</div>
                </div>
             </div>
-
-            {/* あなたの勝敗 */}
-            <div className="mb-10">
-              {(() => {
-                const myScore = isHost ? battleData?.hostScore : battleData?.guestScore;
-                const oppScore = isHost ? battleData?.guestScore : battleData?.hostScore;
-                if (myScore == null || oppScore == null) return null;
-                
-                if (myScore > oppScore) return <p className="text-5xl font-black text-green-400 animate-bounce">YOU WIN! 🏆</p>;
-                if (myScore < oppScore) return <p className="text-5xl font-black text-red-400">YOU LOSE... 💀</p>;
-                return <p className="text-5xl font-black text-slate-300">DRAW 🤝</p>;
-              })()}
-            </div>
-
-            <button onClick={() => setGameMode(null)} className="bg-white text-slate-900 px-8 py-3 rounded-full font-bold hover:bg-slate-200 transition">
-              タイトルに戻る
-            </button>
+            <div className="mb-10">{(() => { const my = isHost ? battleData?.hostScore : battleData?.guestScore; const op = isHost ? battleData?.guestScore : battleData?.hostScore; if (my! > op!) return <p className="text-5xl font-black text-green-400 animate-bounce">YOU WIN! 🏆</p>; if (my! < op!) return <p className="text-5xl font-black text-red-400">YOU LOSE... 💀</p>; return <p className="text-5xl font-black text-slate-300">DRAW 🤝</p>; })()}</div>
+            <button onClick={() => setGameMode(null)} className="bg-white text-slate-900 px-8 py-3 rounded-full font-bold hover:bg-slate-200 transition">タイトルに戻る</button>
           </div>
         )}
       </div>
     );
   }
 
-  // --- UI: クイズ画面 ---
+  // --- クイズ画面 ---
   if (!currentQuiz && result !== "FINISHED") {
     return <div className="min-h-screen bg-green-50 flex justify-center items-center"><div className="animate-spin text-4xl">🥦</div></div>;
   }
 
-  // ソロ結果画面
+  // --- ソロ結果画面 (ランキング表示) ---
   const isBattle = gameMode === "battle_game";
   const isFinished = result === "FINISHED";
 
@@ -568,15 +561,28 @@ export default function Home() {
        <div className="min-h-screen bg-slate-100 flex flex-col items-center py-8 px-4 overflow-hidden">
          <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl overflow-hidden min-h-[600px] flex flex-col relative">
            <div className="py-10 px-6 text-center bg-gradient-to-b from-white to-green-50 h-full flex flex-col justify-center animate-fade-in-up">
-            <div className="mb-8">
+            <div className="mb-4">
               <p className="text-gray-500 font-bold mb-2">SCORE</p>
               <div className="text-6xl font-black text-slate-800">{score}<span className="text-2xl text-gray-400">/10</span></div>
               <p className="text-gray-400 text-sm font-bold mt-2">MODE: {gameMode === "choice" ? "4択" : "数字入力"}</p>
             </div>
-            <div className="bg-white p-6 rounded-2xl shadow-lg mb-8 border-2 border-gray-100">
-              <h2 className={`text-2xl font-black mb-3 ${rank.color}`}>{rank.title}</h2>
-              <p className="text-gray-600 font-medium whitespace-pre-wrap leading-relaxed">{rank.msg}</p>
+
+            {/* ★ランキング表示エリア */}
+            <div className="w-full bg-slate-50 rounded-xl border border-slate-200 p-4 mb-6">
+                <h3 className="font-bold text-slate-500 text-sm mb-3">🏆 {gameMode === "choice" ? "4択" : "数字"}モード 歴代TOP10</h3>
+                <div className="space-y-2 max-h-40 overflow-y-auto pr-1 custom-scrollbar">
+                    {ranking.length > 0 ? ranking.map((r, i) => (
+                        <div key={r.id} className={`flex justify-between items-center p-2 rounded ${r.name === userName && r.score === score ? "bg-yellow-100 border border-yellow-300" : "bg-white border border-slate-100"}`}>
+                            <div className="flex items-center gap-2 truncate">
+                                <span className={`font-bold w-5 text-center ${i < 3 ? "text-yellow-600" : "text-slate-400"}`}>{i+1}</span>
+                                <span className="text-sm font-bold truncate max-w-[120px]">{r.name}</span>
+                            </div>
+                            <span className="font-black text-slate-700">{r.score}点</span>
+                        </div>
+                    )) : <p className="text-xs text-center text-slate-400">ランキング読み込み中...</p>}
+                </div>
             </div>
+
             <div className="space-y-3 mb-8">
               <a href={getShareUrl(shareText)} target="_blank" rel="noopener noreferrer" className="block w-full bg-black text-white py-4 rounded-full font-bold shadow-lg hover:bg-gray-800 transition transform hover:-translate-y-1 text-center flex items-center justify-center gap-2">
                 <span className="text-xl">𝕏</span> 結果をポストする
