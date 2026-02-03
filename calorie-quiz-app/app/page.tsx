@@ -160,11 +160,11 @@ export default function Home() {
           });
 
           // 2. ランキング取得 (同じモードの上位10件)
+          // 注意: where + orderBy を組み合わせると Firestore の複合インデックスが必要になるため、
+          // ここではサーバ側での orderBy を使わずに同モードの全件を取得してクライアント側でソートします。
           const q = query(
             collection(db, "scores"),
-            where("mode", "==", gameMode),
-            orderBy("score", "desc"),
-            limit(10)
+            where("mode", "==", gameMode)
           );
           
           const querySnapshot = await getDocs(q);
@@ -173,7 +173,9 @@ export default function Home() {
             const d = doc.data();
             rankList.push({ id: doc.id, name: d.name, score: d.score });
           });
-          setRanking(rankList);
+          // クライアント側でスコア降順にソートして上位10件にする
+          rankList.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+          setRanking(rankList.slice(0, 10));
 
         } catch (error) {
           console.error("ランキング処理エラー:", error);
